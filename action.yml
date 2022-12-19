@@ -1,0 +1,57 @@
+name: "Cache Bicep"
+description: "Setup Bicep for Azure CLI and cache it to not have to download it on every run"
+
+inputs:
+  bicepversion:
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+
+    #
+    # Get latest Bicep version
+    # This step only runs if BICEP_VERSION is not set
+    #  
+    - name: "Setup variables"
+      shell: bash
+      run: |
+        bicepVersion=$BICEP_VERSION
+        if [ -z "$bicepVersion" ]; then
+          bicepVersion=$(az bicep list-versions --query [0] -o tsv);
+          echo "Using latest bicep version: ${bicepVersion}";
+        else
+          echo "Using bicep version '${bicepVersion}' from variable BICEP_VERSION";
+        fi
+        echo "BICEP_VERSION=${bicepVersion}" >> $GITHUB_ENV
+
+        configPath=$(dirname $(az config get | jq -r '.cloud[0].source'))
+        echo "BICEP_CONFIG_PATH=${configPath}" >> $GITHUB_ENV
+      env:
+        BICEP_VERSION: ${{ inputs.bicepversion }}
+
+    #
+    # Cache Bicep
+    # Cache dependencies if version has not changed
+    #  
+    - name: Cache Bicep
+      id: cache-bicep
+      uses: actions/cache@v3
+      with:
+        path: |
+          ${{ env.BICEP_CONFIG_PATH }}/bicepVersionCheck.json
+          ${{ env.BICEP_CONFIG_PATH }}/bin/bicep
+        key: '"bicep" | ${{ env.BICEP_VERSION }}'
+    
+    #
+    # Install bicep
+    # Install required runtime modules
+    #
+    - name: "Install Bicep"
+      if: steps.cache-bicep.outputs.cache-hit != 'true' 
+      shell: bash
+      run: |
+        az bicep install --version "${BICEP_VERSION}"
+      env:
+        BICEP_VERSION: ${{ env.BICEP_VERSION }}
